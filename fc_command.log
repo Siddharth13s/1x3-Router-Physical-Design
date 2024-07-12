@@ -1,0 +1,113 @@
+#@ # 
+#@ # Running fc_shell Version U-2022.12-SP4 for linux64 -- Jun 29, 2023
+#@ # Date:   Sun Jun 23 23:04:02 2024
+#@ # Run by: SiddharthSahu@mavenserver-RH3
+#@ 
+
+gui_set_pref_value -category {SelectByNamePalette} -key {ObjectType} -value {Logical Cells}
+source -echo ./setup.tcl
+create_lib -technology $TECH_FILE -ref_libs $REFERENCE_LIBRARY router.dlib
+analyze -format verilog [glob router_rtl/*.v]
+
+elaborate router_top
+set_top_module router_top
+win_set_filter -visible -class cell -filter {assembly_die_margin clock_margin hard_macro_margin hard_margin route_blockage_margin seal_ring_margin soft_margin}
+win_set_filter -visible -class pseudo_bump -filter {deleted}
+win_set_filter -visible -class pseudo_tsv -filter {deleted}
+win_set_filter -visible -class placement_blockage -filter {wiring} -layer {0-82}
+win_set_filter -expand_cell_types {soft_macro  }
+win_set_select_class -visible {cell port bound routing_blockage shaping_blockage pg_region bump_region pseudo_bump pseudo_tsv pin_blockage block_shielding topology_node topology_edge topology_repeater annotation_shape core_area die_area edit_group shape via terminal fill_cell placement_blockage }
+win_set_filter -class cell -filter {array assembly_die_margin clock_margin hard_macro_margin hard_margin route_blockage_margin seal_ring_margin soft_margin}
+win_set_filter -class pseudo_bump -filter {deleted}
+win_set_filter -class pseudo_tsv -filter {deleted}
+win_set_filter -class placement_blockage -filter {wiring} -layer {0-82}
+win_set_select_class {cell port bound routing_blockage shaping_blockage pg_region bump_region pseudo_bump pseudo_tsv pin_blockage topology_node topology_edge topology_repeater annotation_shape edit_group shape via placement_blockage }
+gui_set_setting -window [gui_get_current_window -types Schematic -mru] -setting schematic:background_color -value black
+gui_set_setting -window [gui_get_current_window -types Schematic -mru] -setting zoomFitFactor -value 0.0
+change_selection [get_blocks -all -lib_cells router.dlib:router_top.design]
+change_selection [get_blocks -all -lib_cells router.dlib:router_top.design]
+
+read_parasitic_tech -layermap ../ref/tech/saed32nm_tf_itf_tluplus.map -tlup ../ref/tech/saed32nm_1p9m_Cmax.lv.nxtgrd -name maxTLU
+read_parasitic_tech -layermap ../ref/tech/saed32nm_tf_itf_tluplus.map -tlup ../ref/tech/saed32nm_1p9m_Cmin.lv.nxtgrd -name minTLU
+report_lib -parasitic_tech router.dlib
+load_upf ./design_data/router.upf
+commit_upf
+change_selection 
+gui_show_man_page check_mv_design
+check_mv_design
+get_lib_cells -filter "function_id==a0.0"
+get_lib_cells -filter "function_id==Ia0.0"
+set_dont_touch [get_lib_cells */TIE*] false
+set_lib_cell_purpose -include optimization [get_lib_cells */TIE*]
+source -echo ./design_data/mcmm_router.tcl
+read_sdc ./constraint/router.sdc
+compile_fusion -from initial_map -to initial_map
+gui_zoom -window [gui_get_current_window -view] -full
+compile_fusion -from logic_opto -to logic_opto
+initialize_floorplan -boundary {{44.063 -4.318} {166.534 94.804}} -core_offset {3}
+set_app_options -name place.coarse.fix_hard_macros -value false
+set_app_options -name plan.place.auto_create_blockages -value auto
+create_placement -floorplan
+gui_zoom -window [gui_get_current_window -view] -full
+compile_fusion -from initial_place -to initial_place
+place_pins -self
+compile_fusion -from initial_drc -to initial_drc
+compile_fusion -from initial_opto -to initial_opto
+get_scan_chain_count
+check_legality
+rt
+rt
+report_optimization_history
+compile_fusion -from final_place -to final_place
+check_legality
+report_qor -summary
+report_power
+compile_fusion -from final_opto -to final_opto
+report_qor -summary
+report_power
+set_app_options -list {place.coarse.continue_on_missing_scandef{true}}
+connect_pg_net -automatic
+create_pg_mesh_pattern mesh_pattern -layers { {{vertical_layer: M6} {width: 0.84} {pitch: 8.4} {spacing: interleaving}}  {{horizontal_layer: M7} {width: 0.84} {pitch: 8.4} {spacing: interleaving}} }
+set_pg_strategy mesh_strategy -core -pattern {{pattern: mesh_pattern}{nets: {VDD VSS}}} -blockage {macros: all}
+create_pg_std_cell_conn_pattern std_cell_pattern
+set_pg_strategy std_cell_strategy -core -pattern {{pattern: std_cell_pattern}{nets: {VDD VSS}}}
+compile_pg -ignore_via_drc
+check_pg_drc
+check_pg_connectivity
+set_clock_tree_options -target_skew 0.05 -corners [get_corners ss*]
+set_clock_tree_options -target_skew 0.02 -corners [get_corners ff*]
+report_clock_tree_options
+set CTS_CELLS [get_lib_cells "*/NBUFF*LVT */NBUFF*RVT */INVX*_LVT */INVX*_RVT */CGL* */LSUP* */*DFF*"]
+set_dont_touch $CTS_CELLS false
+set_lib_cell_purpose -exclude cts [get_lib_cells] 
+set_lib_cell_purpose -include cts $CTS_CELLS
+source -echo ../lab_8a/scripts/ndr.tcl
+report_routing_rules -verbose
+report_clock_routing_rules
+report_ports -verbose [get_ports *clk]
+report_ports -verbose [get_ports *clock]
+report_clocks -skew
+foreach_in_collection scen [all_scenarios] {
+  current_scenario $scen
+  set_clock_uncertainty 0.1 -setup [all_clocks]
+  set_clock_uncertainty 0.05 -hold [all_clocks]
+}
+current_mode func
+set_max_transition 0.15 -clock_path [get_clocks] -corners [all_corners]
+
+set_app_options -name time.remove_clock_reconvergence_pessimism -value true
+v report_clock_settings
+report_clock_settings
+set_app_options -name clock_opt.flow.enable_ccd -value false
+set_scenario_status [current_scenario] -hold true
+report_timing -delay min
+check_design -checks pre_clock_tree_stage
+clock_opt -to route_clock
+clock_opt -from final_opto -to final_opto
+save block
+route_auto
+route_opt
+check_routes
+check_lvs
+save_block router.dlib:router_top
+exit

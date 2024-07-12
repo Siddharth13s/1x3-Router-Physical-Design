@@ -1,0 +1,1 @@
+create_clock -period 5 -name router_clock [get_ports clock]
